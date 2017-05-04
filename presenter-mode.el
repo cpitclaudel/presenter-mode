@@ -420,6 +420,7 @@ May return incorrect results at end of slide."
   :lighter " 🎥 -design"
   :map 'presenter-design-mode-map
   (when presenter-design-mode
+    (presenter--set-markers-from-defaults)
     (presenter-mode -1)))
 
 (provide 'presenter-mode)
