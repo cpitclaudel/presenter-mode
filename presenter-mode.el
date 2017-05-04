@@ -5,17 +5,33 @@
 
 ;;; Code:
 
-(require 'dash)
-
 (defvar-local presenter-mode nil)
 
-(defvar presenter-centered-lines-delimiters '(("(*** " . " ***)")
-                                     ("(*+ " . " +*)")
-                                     ("(*! " . " !*)"))
-  "Markers indicating centered lines.")
+(defvar-local presenter-title-delimiters nil
+  "List of markers (pairs of strings) indicating centered lines.
+See also `presenter-default-markers-alist'.")
 
-(defvar presenter-hidden-block-delimiters
-  '(("(* begin hide *)" . "(* end hide *)")))
+(defvar presenter-hidden-block-delimiters nil
+  "List of markers (pairs of strings) delimiting hidden blocks.
+See also `presenter-default-markers-alist'.")
+
+(defvar presenter-slide-separators nil
+  "List of markers (strings) used to separate slides.
+See also `presenter-default-markers-alist'.")
+
+(defconst presenter-default-markers-alist
+  `(((fstar-mode coq-mode)
+     ("(******************************************************************************)\n")
+     (("(*** " . " ***)")
+      ("(*+ " . " +*)")
+      ("(*! " . " !*)"))
+     (("(* begin hide *)" . "(* end hide *)"))))
+  "List of default `presenter-mode' markers by major mode.
+Format is (MODES SLIDE-SEPARATORS TITLE-MARKERS HIDDEN-BLOCK-MARKERS)
+MODES is a list of major modes.
+SLIDE-SEPARATORS is a list of strings that separate slides.
+TITLE-MARKERS are conses of strings that surround centered text.
+HIDDEN-BLOCK-MARKERS are conses of strings that surround hidden text.")
 
 (defconst presenter--auto-inserted-symbol 'presenter--auto-inserted)
 (defconst presenter--marker-symbol 'presenter--marker)
@@ -61,6 +77,12 @@
               (overlay-start presenter--narrowing-right-overlay))
             (point-max))))
 
+(defun presenter-widen ()
+  "Remove the custom narrowing that we introduced."
+  (interactive)
+  (dolist (ov (list presenter--narrowing-left-overlay presenter--narrowing-right-overlay))
+    (when ov (delete-overlay ov))))
+
 (defmacro presenter--with-widening (&rest body)
   "Run BODY without overlay-based narrowing.
 Do not modify the contents of the buffer in BODY."
@@ -71,12 +93,6 @@ Do not modify the contents of the buffer in BODY."
        (unwind-protect
            ,@body
          (presenter--narrow-to-region (car ,region-sym) (cdr ,region-sym))))))
-
-(defun presenter-widen ()
-  "Remove the custom narrowing that we introduced."
-  (interactive)
-  (dolist (ov (list presenter--narrowing-left-overlay presenter--narrowing-right-overlay))
-    (when ov (delete-overlay ov))))
 
 (defun presenter--narrow-to-region (beg end)
   "Implement narrowing to BEG .. END using overlays.
@@ -132,8 +148,8 @@ deleted by the next recentering."
 Only remove the overlays whose ‘presenter--marker-symbol’ is
 WHICH.  If WHICH is null, remove all of them."
   (dolist (ov (overlays-in beg end))
-    (-when-let* ((tag (presenter--own-overlay ov)))
-      (when (or (null which) (eq tag which))
+    (let ((tag (presenter--own-overlay ov)))
+      (when (and tag (or (null which) (eq tag which)))
         (when (presenter--auto-inserted-overlay ov)
           (delete-region (overlay-start ov) (overlay-end ov)))
         (delete-overlay ov)))))
@@ -174,14 +190,14 @@ hide it with an overlay."
 (defun presenter--construct-centering-regexp ()
   "Construct a regexp to find lines to center.
 The regexp matches lines that contain both elements of
-‘presenter-centered-lines-delimiters’."
+‘presenter-title-delimiters’."
   (concat "\\(?:"
           (mapconcat
            (lambda (pair)
              (concat "\\(?:^.*?" "\\(?1:" (regexp-quote (car pair)) "\\s-*\\)"
                      ".*?"
                      "\\(?2:\\s-*" (regexp-quote (cdr pair)) "\\)" ".*?$\\)"))
-           presenter-centered-lines-delimiters "\\|")
+           presenter-title-delimiters "\\|")
           "\\)"))
 
 (defvar-local presenter--window-width nil
@@ -248,17 +264,14 @@ otherwise, remove it."
   (presenter--add-invisibility-overlays)
   (presenter--recenter-annotated-lines))
 
-(defvar presenter-slide-separator "(******************************************************************************)\n"
-  "String used to separate slides.")
-
 (defun presenter--beginning-of-slide-re ()
   "Compute a regexp describing the beginning of slides."
-  ;; Include "." to ensure that the regexp doesn't have 0-width
-  (concat "\\(\\`\\|" (regexp-quote presenter-slide-separator) "\\)[^0]"))
+  ;; Final [^\0] prevents empty matches at bob
+  (concat "\\(\\`\\|" (regexp-opt presenter-slide-separators) "\\)[^\0]"))
 
 (defun presenter--end-of-slide-re ()
   "Compute a regexp describing the end of slides."
-  (concat "\\(\\'\\|" (regexp-quote presenter-slide-separator) "\\)"))
+  (concat "\\(\\'\\|" (regexp-opt presenter-slide-separators) "\\)"))
 
 (defun presenter--point-at-bos ()
   "Find starting point of current slide.
@@ -288,7 +301,8 @@ May return incorrect results at end of slide."
   (presenter--remove-all-overlays presenter--separator-symbol)
   (presenter--narrow-to-region (presenter--point-at-bos) (presenter--point-at-eos))
   (presenter-beginning-of-slide)
-  (when (looking-at (regexp-quote presenter-slide-separator))
+  ;; Not using (presenter--beginning-of-slide-re) because it includes bob
+  (when (looking-at (regexp-opt presenter-slide-separators))
     (let ((ov (make-overlay (match-beginning 0) (match-end 0) (current-buffer) nil t)))
       (overlay-put ov presenter--marker-symbol presenter--separator-symbol)
       (overlay-put ov 'display presenter-zero-width-space)
@@ -320,30 +334,51 @@ May return incorrect results at end of slide."
     (define-key map (kbd "<next>") #'presenter-forward)
     map))
 
+(defun presenter--find-delims-for-mode (mode)
+  "Find markers from MODE in `presenter-default-markers-alist'."
+  (catch 'found
+    (pcase-dolist (`(,modes . ,delims) presenter-default-markers-alist)
+      (when (memq mode modes)
+        (throw 'found delims)))
+    (list nil nil nil)))
+
+(defun presenter--set-markers-from-defaults ()
+  "Load markers from `presenter-default-markers-alist'."
+  (pcase-let* ((`(,slide-seps ,title-delims ,hidden-blocks)
+                (presenter--find-delims-for-mode major-mode)))
+    (setq presenter-slide-separators
+          (or presenter-slide-separators slide-seps))
+    (setq presenter-hidden-block-delimiters
+          (or presenter-hidden-block-delimiters hidden-blocks))
+    (setq presenter-title-delimiters
+          (or presenter-title-delimiters title-delims))))
+
 (define-minor-mode presenter-mode
   "Prepare the current buffer for presentations."
   :lighter " 🎥"
   :variable presenter-mode
   :map 'presenter-mode-map
   (presenter-widen)
-  (if presenter-mode
-      (progn
-        (presenter-design-mode -1)
-        (add-hook 'window-configuration-change-hook #'presenter--recenter-annotated-lines-in-all-buffers nil t)
-        (add-hook 'post-command-hook #'presenter--move-point-out-of-narrowing-overlays nil t)
-        (presenter--update-invisibility-spec t)
-        (presenter-refresh)
-        (goto-char (point-min))
-        (presenter-narrow-to-current-slide))
+  (cond
+   (presenter-mode
+    (presenter-design-mode -1)
+    (add-hook 'window-configuration-change-hook #'presenter--recenter-annotated-lines-in-all-buffers nil t)
+    (add-hook 'post-command-hook #'presenter--move-point-out-of-narrowing-overlays nil t)
+    (presenter--update-invisibility-spec t)
+    (presenter--set-markers-from-defaults)
+    (presenter-refresh)
+    (goto-char (point-min))
+    (presenter-narrow-to-current-slide))
+   (t
     (presenter--remove-all-overlays)
     (presenter--update-invisibility-spec nil)
     (remove-hook 'post-command-hook #'presenter--move-point-out-of-narrowing-overlays t)
-    (remove-hook 'window-configuration-change-hook #'presenter--recenter-annotated-lines-in-all-buffers t)))
+    (remove-hook 'window-configuration-change-hook #'presenter--recenter-annotated-lines-in-all-buffers t))))
 
 (defun presenter-insert-delimiter ()
   "Insert a slide delimiter on the current line."
   (interactive)
-  (insert presenter-slide-separator))
+  (insert (car presenter-slide-separators)))
 
 (defun presenter-insert-pair (pair)
   "Insert PAIR on the current line."
@@ -359,17 +394,17 @@ May return incorrect results at end of slide."
 (defun presenter-insert-pair-1 ()
   "Insert the 1st-level centering delimiters."
   (interactive)
-  (presenter-insert-pair (nth 0 presenter-centered-lines-delimiters)))
+  (presenter-insert-pair (nth 0 presenter-title-delimiters)))
 
 (defun presenter-insert-pair-2 ()
   "Insert the 2nd-level centering delimiters."
   (interactive)
-  (presenter-insert-pair (nth 1 presenter-centered-lines-delimiters)))
+  (presenter-insert-pair (nth 1 presenter-title-delimiters)))
 
 (defun presenter-insert-pair-3 ()
   "Insert the 3rd-level centering delimiters."
   (interactive)
-  (presenter-insert-pair (nth 2 presenter-centered-lines-delimiters)))
+  (presenter-insert-pair (nth 2 presenter-title-delimiters)))
 
 (defvar presenter-design-mode-map
   (let ((map (make-sparse-keymap)))
