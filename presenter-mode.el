@@ -406,6 +406,35 @@ May return incorrect results at end of slide."
   (interactive)
   (presenter-insert-pair (nth 2 presenter-title-delimiters)))
 
+(defun presenter-comment-or-uncomment-region-or-line-with-pair (pair)
+  "Comments or uncomments the region or the current line if there's no active region."
+  (interactive)
+  (let (beg end (comment-start (car pair)) (comment-end (cdr pair)))
+    (if (region-active-p)
+        (setq beg (region-beginning) end (region-end))
+      (setq beg (line-beginning-position) end (line-end-position)))
+    (comment-or-uncomment-region beg end)))
+
+(defun presenter-comment-or-uncomment-pair-0 ()
+  "Comment with hidden code delimiters."
+  (interactive)
+  (presenter-comment-or-uncomment-region-or-line-with-pair (nth 0 presenter-hidden-block-delimiters)))
+
+(defun presenter-comment-or-uncomment-pair-1 ()
+  "Comment with the 1st-level centering delimiters."
+  (interactive)
+  (presenter-comment-or-uncomment-region-or-line-with-pair (nth 0 presenter-title-delimiters)))
+
+(defun presenter-comment-or-uncomment-pair-2 ()
+  "Comment with the 2st-level centering delimiters."
+  (interactive)
+  (presenter-comment-or-uncomment-region-or-line-with-pair (nth 1 presenter-title-delimiters)))
+
+(defun presenter-comment-or-uncomment-pair-3 ()
+  "Comment with the 3st-level centering delimiters."
+  (interactive)
+  (presenter-comment-or-uncomment-region-or-line-with-pair (nth 2 presenter-title-delimiters)))
+
 (defvar presenter-design-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C--") #'presenter-insert-delimiter)
@@ -413,6 +442,10 @@ May return incorrect results at end of slide."
     (define-key map (kbd "C-c C-1") #'presenter-insert-pair-1)
     (define-key map (kbd "C-c C-2") #'presenter-insert-pair-2)
     (define-key map (kbd "C-c C-3") #'presenter-insert-pair-3)
+    (define-key map (kbd "C-c C-w C-0") #'presenter-comment-or-uncomment-pair-0)
+    (define-key map (kbd "C-c C-w C-1") #'presenter-comment-or-uncomment-pair-1)
+    (define-key map (kbd "C-c C-w C-2") #'presenter-comment-or-uncomment-pair-2)
+    (define-key map (kbd "C-c C-w C-3") #'presenter-comment-or-uncomment-pair-3)
     map))
 
 (define-minor-mode presenter-design-mode
