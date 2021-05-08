@@ -20,11 +20,17 @@ See also `presenter-default-markers-alist'.")
 See also `presenter-default-markers-alist'.")
 
 (defconst presenter-default-markers-alist
-  `(((fstar-mode coq-mode)
+  `(((coq-mode)
      ("(******************************************************************************)\n")
      (("(*** " . " ***)")
       ("(*+ " . " +*)")
       ("(*! " . " !*)"))
+     (("(* begin hide *)" . "(* end hide *)")))
+    ((fstar-mode)
+     ("(******************************************************************************)\n")
+     (("(** * " . " * **)")
+      ("(** ** " . " ** **)")
+      ("(** *** " . " *** **)"))
      (("(* begin hide *)" . "(* end hide *)"))))
   "List of default `presenter-mode' markers by major mode.
 Format is (MODES SLIDE-SEPARATORS TITLE-MARKERS HIDDEN-BLOCK-MARKERS)
